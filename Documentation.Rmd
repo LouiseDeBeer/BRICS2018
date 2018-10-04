@@ -1,0 +1,358 @@
+---
+title: "BRICS Challenge"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Selection of Data Sets
+#### 1. Web Traffic
+- Super Messy
+- Try to avoid
+- NO
+
+#### 2. Wallmart
+- Sales Data
+- Fairly Clean
+- Yes - Good variety of data
+
+#### 3. Titanic
+- Personal Information
+- Survival Information
+- Ehhh
+
+#### 4. TaxiFare
+- Location Data
+- Maybe, understanding location data
+
+#### 5. Movie Sentiment
+- Cannot see yet
+- Fairly Empty
+- No
+
+#### 6. Meteorite
+- Locations, etc
+- Maybe, understanding location data
+
+#### 7. Lending Club
+- Loans with personal data
+- Maybe, boring
+
+#### 8. Machine Performance
+- Nothing understandable
+- NO
+
+#### 9. IMDB Ratings
+- Very Clean
+- Titles, Year, Actor, Ratings
+- Maybe
+
+#### 10. Movie Songs
+- LEarning curve to read 
+- NO
+
+#### 11. Nutrition
+- Difficult to understand
+- A lot going on
+- NO
+
+### Selection
+Maaking use of a comparison between the **Wallmart** and **Taxi Data** by correlating the _dates_
+
+## Data Prep
+### Data Sets
+- WalmartFeatures
+- TaxiFares
+- TaxiTrain
+- TaxiTest
+
+
+#### WalmartFeatures
+Only keeping:
+- Date
+- Temperature
+- Fuel_Price
+- CPI
+- Unemployment
+- IsHoliday
+
+```{r}
+library(dplyr)
+library(readr)
+library(rworldmap)
+library(ggplot2)
+library(rpart)
+library(rattle)
+library(descr)
+WallmartFeatures <- read.csv("C:/Users/GoRentals/Desktop/FlashDrive/DATA SETS/2. Walmart Dataset/features.csv")
+orgData <- WallmartFeatures
+head(WallmartFeatures)
+```
+
+##### Delete unwanted columns
+```{r}
+WallmartFeatures$Store <- NULL
+WallmartFeatures$MarkDown1 <- NULL
+WallmartFeatures$MarkDown2 <- NULL
+WallmartFeatures$MarkDown3 <- NULL
+WallmartFeatures$MarkDown4 <- NULL
+WallmartFeatures$MarkDown5 <- NULL
+
+head(WallmartFeatures)
+```
+
+##### Date
+```{r}
+hist(as.numeric(WallmartFeatures$Date))
+# max(as.numeric(WallmartFeatures$Date))
+
+date <- as.Date(WallmartFeatures$Date)
+# sort(date)
+```
+The frequency of mesurements for each date appears to be the same
+
+###### Date Range
+```{r}
+head(sort(date))[1]
+tail(sort(date))[1]
+```
+
+##### Temperature
+```{r}
+hist(WallmartFeatures$Temperature)
+```
+Temperatures appear to be normally distributed
+
+##### Fuel Price
+```{r}
+hist(WallmartFeatures$Fuel_Price)
+```
+Normally Distributed
+
+##### CPI
+```{r}
+hist(WallmartFeatures$CPI)
+```
+CPI is not normally distributed
+
+##### Unemployment Rate
+```{r}
+hist(WallmartFeatures$Unemployment)
+```
+Normally Distributed
+
+##### Holidays
+```{r}
+hist(as.numeric(WallmartFeatures$IsHoliday))
+```
+Class Imbalance is visible here
+
+##### Creating weekly buckets
+```{r}
+WallmartFeatures$WeekNo <- as.numeric(strftime(WallmartFeatures$Date, format = "%V"))
+head(WallmartFeatures)
+```
+##### Creating aggregation table to join with taxi data on weekNo
+
+```{r}
+rm(WeeklyFeatures)
+WeeklyFeatures <- as.data.frame(WallmartFeatures %>% group_by(WeekNo) 
+                                %>% summarize(
+                                  AvgTemp = mean(Temperature)
+                                  , AvgFuelPrice = mean(Fuel_Price)
+                                  , AvgCPI = mean(CPI)
+                                  , AvgUnemployment = mean(Unemployment)
+                                  , ContainsHoliday = max(as.numeric(IsHoliday))
+                                  ))
+head(WeeklyFeatures)
+```
+
+#### Taxi Test, Train & Fares
+```{r}
+TaxiTest <- read.csv("C:/Users/GoRentals/Desktop/FlashDrive/DATA SETS/4. Taxi Fare Dataset/test.csv")
+#TaxiTrain <- read.csv("C:/Users/GoRentals/Desktop/FlashDrive/DATA SETS/4. Taxi Fare Dataset/train.csv")
+# Taxi Train chunk
+TaxiTrain_MIN <- read.csv("C:/Users/GoRentals/Desktop/FlashDrive/DATA SETS/4. Taxi Fare Dataset/train.csv"
+                          , nrows=10000)
+TaxiFares <- read.csv("C:/Users/GoRentals/Desktop/FlashDrive/DATA SETS/4. Taxi Fare Dataset/sample_submission.csv")
+```
+#### Taxi data plots
+```{r}
+hist(TaxiTrain_MIN$fare_amount)
+hist(as.numeric(TaxiTrain_MIN$pickup_datetime))
+hist(as.numeric(TaxiTrain_MIN$passenger_count))
+TaxiTrain_MIN <- TaxiTrain_MIN[!TaxiTrain_MIN$fare_amount < 1, ]
+TaxiTrain_MIN <- TaxiTrain_MIN[!TaxiTrain_MIN$passenger_count < 1, ]
+
+pickUpMap <- getMap(resolution = "low")
+plot(pickUpMap
+     #, xlim = c(min(TaxiTrain_MIN$pickup_longitude), max(TaxiTrain_MIN$pickup_longitude))
+     #, ylim = c(min(TaxiTrain_MIN$pickup_latitude), max(TaxiTrain_MIN$pickup_latitude))
+     , xlim = c(-73.9, -74.2)
+     , ylim = c(40.6, 40.9)
+     , asp = 1)
+points(TaxiTrain_MIN$pickup_longitude, TaxiTrain_MIN$pickup_latitude, col = "red", cex = .6)
+
+TaxiTrain_MIN$Distance <- sqrt((TaxiTrain_MIN$dropoff_longitude - TaxiTrain_MIN$pickup_longitude)^2
+                               +
+                                 (TaxiTrain_MIN$dropoff_latitude - TaxiTrain_MIN$pickup_latitude)^2
+                               )
+TaxiTrain_MIN <- TaxiTrain_MIN[!TaxiTrain_MIN$Distance < 0.1, ]
+hist(TaxiTrain_MIN$Distance)
+
+TaxiTrain_MIN$Distance_pp <- TaxiTrain_MIN$Distance / TaxiTrain_MIN$passenger_count
+hist(TaxiTrain_MIN$Distance_pp)
+```
+
+Fares cannot be smaller than zero - the distribution is normal
+##### Number of Passengers
+Calculating fare per person
+```{r}
+
+TaxiTrain_MIN$fare_pp <- TaxiTrain_MIN$fare_amount / TaxiTrain_MIN$passenger_count
+hist(TaxiTrain_MIN$fare_pp)
+hist(TaxiTrain_MIN$passenger_count)
+
+```
+Passenger Count: 
+We have the largest frequence at 1; as is expected, however, there's an unexpected spike at a passenger count of 5
+We are omitting any rows where the passenger count of the fare is equal to or below one, because these data points are not of interest to the model
+
+###### Date Range
+```{r}
+head(sort(TaxiTrain_MIN$pickup_datetime))[1]
+tail(sort(TaxiTrain_MIN$pickup_datetime))[1]
+```
+Date range:  **2009-01-01** to  **2015-06-27** 
+
+#### Set the WeekNo per ride
+```{r}
+TaxiTrain_MIN$WeekNo <- as.numeric(strftime(TaxiTrain_MIN$pickup_datetime, format = "%V"))
+```
+
+#### Join Taxi data with Wallmart Weekly Features
+```{r}
+dfFeatures <- merge(TaxiTrain_MIN, WeeklyFeatures, by = "WeekNo")
+head(dfFeatures)
+```
+#### Run PCA and analyse results
+Version 1
+```{r}
+dPCA.Features <- dfFeatures
+dPCA.Features$pickup_datetime <- NULL
+dPCA.Features$key <- NULL
+
+
+dPCA <- prcomp(na.omit(dPCA.Features), center = TRUE, scale. = TRUE)
+print(dPCA)
+plot(dPCA, type = "l")
+summary(dPCA)
+
+#Draw circle of trust
+#Positively correlated is grouped together
+theta <- seq(0, 2*pi, length.out = 100)
+circle <- data.frame(x = cos(theta), y = sin(theta))
+p <- ggplot(circle, aes(x, y)) + geom_path()
+loadings <- data.frame(dPCA$rotation, .names = row.names(dPCA$rotation))
+p + geom_text(data = loadings
+		, mapping = aes(x = PC1, y = PC2, label = .names, colour = .names)) +
+		coord_fixed(ratio=1) +
+		labs(x="PC1", y="PC2")
+```
+
+Based on the PCA these are the features we've selected for our model:
+<Make a list of feaetures>
+
+Version 2
+```{r}
+dPCA.Features <- dfFeatures
+dPCA.Features$pickup_datetime <- NULL
+dPCA.Features$key <- NULL
+dPCA.Features$dropoff_latitude <- NULL
+dPCA.Features$dropoff_longitude  <- NULL
+dPCA.Features$pickup_latitude  <- NULL
+dPCA.Features$pickup_longitude  <- NULL
+
+dPCA <- prcomp(na.omit(dPCA.Features), center = TRUE, scale. = TRUE)
+print(dPCA)
+plot(dPCA, type = "l")
+summary(dPCA)
+
+#Draw circle of trust
+#Positively correlated is grouped together
+theta <- seq(0, 2*pi, length.out = 100)
+circle <- data.frame(x = cos(theta), y = sin(theta))
+p <- ggplot(circle, aes(x, y)) + geom_path()
+loadings <- data.frame(dPCA$rotation, .names = row.names(dPCA$rotation))
+p + geom_text(data = loadings
+		, mapping = aes(x = PC1, y = PC2, label = .names, colour = .names)) +
+		coord_fixed(ratio=1) +
+		labs(x="PC1", y="PC2")
+```
+Final features selection:
+!Distance fare_amount 
+#### Decision Tree
+Version 1
+```{r}
+dtDataSet <- dPCA.Features
+dtDataSet$Distance <- NULL
+dtDataSet$fare_amount <- NULL
+
+fitPerPerson <- rpart(dtDataSet$passenger_count ~ ., data = dtDataSet)
+summary(fitPerPerson)
+fancyRpartPlot(fitPerPerson)
+``` 
+Version 2
+```{r}
+dtDataSet <- dPCA.Features
+dtDataSet$Distance <- NULL
+dtDataSet$fare_amount <- NULL
+
+fitPerPerson <- rpart(dtDataSet$passenger_count ~ ., data = dtDataSet, control = rpart.control(cp = 0.001))
+summary(fitPerPerson)
+fancyRpartPlot(fitPerPerson)
+```  
+
+Version 3
+```{r}
+dtDataSet <- dPCA.Features
+dtDataSet$Distance <- NULL
+dtDataSet$Distance_pp <- NULL
+dtDataSet$fare_amount <- NULL
+dtDataSet$fare_pp <- NULL
+dtDataSet$AvgTemp <- NULL
+
+fitPerPerson <- rpart(dtDataSet$passenger_count ~ ., data = dtDataSet, control = rpart.control(cp = 0.001))
+summary(fitPerPerson)
+fancyRpartPlot(fitPerPerson)
+```
+
+#### Final Model and Evaluation
+```{r}
+dtDataSet <- dPCA.Features
+dtDataSet$Distance <- NULL
+dtDataSet$fare_amount <- NULL
+
+dtTrain <- sample_n(dtDataSet, 440)
+dtTest <- sample_n(dtDataSet, 188)
+
+fitPerPerson <- rpart(dtTrain$passenger_count ~ ., data = dtTrain, control = rpart.control(cp = 0.001))
+summary(fitPerPerson)
+fancyRpartPlot(fitPerPerson)
+```
+```{r}
+NoOfPassengerPrediction <- predict(fitPerPerson, dtTest)
+dtTest$Predicted <- predict(fitPerPerson, dtTest)
+
+dtTest$Difference <- dtTest$passenger_count - dtTest$Predicted
+CorrectPredictions <- dtTest[abs(dtTest$Difference) < 0.5, ]
+IncorrectPredictions <- dtTest[abs(dtTest$Difference) >= 0.5, ]
+
+Accuracy <- length(CorrectPredictions$Predicted) / length(dtTest$Predicted)
+Accuracy
+
+hist(dtTest$Difference)
+
+descr(dtTest)
+```
